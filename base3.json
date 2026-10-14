@@ -1,0 +1,8 @@
+{
+	"manifestVersion": 1,
+	"name": "NeonDrift",
+	"namespace": "NeonDrift",
+	"version": "0.3.0",
+	"description": "A level-based reaction and dexterity arcade game for BASE3 with optional personal profiles.",
+	"license": "GPL-3.0-or-later"
+}

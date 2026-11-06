@@ -50,7 +50,7 @@ Session-based authenticated access and a **persisting** SettingsStore must alrea
 
 The display is `NeonDrift\Display\NeonDriftDisplay`, technical name `neondriftdisplay`. Its companion profile endpoint is `NeonDrift\Output\NeonDriftProfileOutput`, technical name `neondriftprofileoutput`. Both are discovered through `IClassMap`. The game assets use `IAssetResolver` logical paths `plugin/NeonDrift/assets/...`. The PHP display and template have parallel paths in `src/Display` and `tpl/Display`. The profile service is registered in the plugin's `init()` using constructor-injected `ISettingsStore`.
 
-In the supplied ILIAS project composition, `Base3IliasLabSettings` includes Neon Drift under **BASE3 Administration > Games** after the unchanged PulseCore entry. No PulseCore code is included or modified in this patch. The host retains responsibility for the admin access policy.
+`NeondriftSettingsTab` is discovered through the existing `ISettingsTab` classmap slot under the shared ClientStack Games tab. The tab and its feature permission are owned by NeonDrift. The host retains responsibility for permission decisions; the gameplay and optional profile endpoint keep their existing behavior.
 
 Install from the directory containing `Base3IliasLab` and the other BASE3 plugins:
 
@@ -60,17 +60,35 @@ unzip -o neondrift-step3.zip
 
 The ZIP contains the **complete NeonDrift 0.3.0 plugin**, with complete source files and tests, and overlays the previously working step-2 installation. The already installed `Base3IliasLab` Games tab integration is intentionally **not overwritten** because it needs no changes. Regenerate the BASE3 classmap if needed. A hard reload may be necessary if the browser has cached old game assets.
 
-## Tests
+## Tests and coverage
+
+All PHP unit tests live in `test/` and use APIs common to **PHPUnit 11.5 and 12.5**. There are no PHPUnit-version switches, alternative implementations, or inline global test classes. The suite covers plugin factory registration and its lazy resolution, feature permissions and native authority delegation, MVC display composition and actual template escaping, both language catalogs, profile validation and limits, persistence and deletion failures, authenticated account isolation, HTTP method/content-type checks, token reuse and creation, CSRF failure modes and read/write access.
+
+Execute the tests using the already installed host PHPUnit runner. For example, from an ILIAS root:
 
 ```sh
-node NeonDrift/test/neondrift.test.cjs
-php -l NeonDrift/src/NeonDriftPlugin.php
-php -l NeonDrift/src/Display/NeonDriftDisplay.php
-php -l NeonDrift/src/Output/NeonDriftProfileOutput.php
-php -l NeonDrift/src/Service/NeonDriftProfileStore.php
+vendor/composer/vendor/bin/phpunit components/Base3/NeonDrift/test
 ```
 
-PHPUnit tests under `NeonDrift/test/` cover MVC asset and endpoint resolution, account isolation and CSRF validation, checkpoint retention and optional persistence semantics. Run them using the host project's existing PHPUnit environment. The Node.js test exercises the actual game script with a simulated browser and API, including fullscreen changes, sound opt-in, Game Over animation settling, score/level progression, reduced-motion changes, touch input, profile deletion races, focus restoration and AJAX teardown. A separate isolated Chromium/Playwright smoke check covers real browser layout and fullscreen on desktop and mobile. The running ILIAS administration AJAX, session implementation and selected SettingsStore backend still require final operator verification: these application dependencies are not part of the supplied archives.
+For a PHP coverage report, enable Xdebug or PCOV in the host runtime and include the module's `src/` tree as source. With Xdebug and the normal ILIAS PHPUnit binary:
+
+```sh
+XDEBUG_MODE=coverage vendor/composer/vendor/bin/phpunit \
+  --coverage-filter components/Base3/NeonDrift/src \
+  --coverage-text components/Base3/NeonDrift/test
+```
+
+Run this same test suite with the installations of PHPUnit 11.5 and PHPUnit 12.5 used by the target projects. The PHPUnit binary and PHP coverage driver are provided by the host; this module intentionally does not bundle another testing framework or bootstrap.
+
+The original Node test also executes the production `assets/js/neondrift.js` script with a simulated browser, input system, Canvas, Web Audio and profile API. From an ILIAS root with Node.js 22:
+
+```sh
+node --test --experimental-test-coverage components/Base3/NeonDrift/test/neondrift.test.cjs
+```
+
+Measured with Node.js 22: **100% production JavaScript line coverage, 100% branch coverage and 100% function coverage**. The Node test file itself is excluded from that production-code claim. The PHP test sources have passed syntax checks and independent runtime smoke checks, but both PHPUnit-version executions and the exact PHP coverage percentage must be verified in the actual host with the coverage driver installed. Do not treat a passing Node coverage result as PHP coverage proof.
+
+The integration with real ILIAS authorization, the configured SettingsStore backend, the host's CSRF/session implementation and live browser accessibility remains host-side acceptance testing, separate from unit coverage.
 
 ## Privacy and accessibility
 

@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const listeners = new Map();
 const windowListeners = new Map();
 const motionListeners = new Map();
-const audioStats = {played: 0, closed: 0};
+const audioStats = {played: 0, closed: 0, oscillators: []};
 let fillRects = 0;
 let scheduledFrame;
 let cancelledFrame;
@@ -86,7 +86,7 @@ const document = {
 };
 class FakeAudioContext {
 	constructor() {this.currentTime = 0; this.state = 'running'; this.destination = {};}
-	createOscillator() {return {frequency: {setValueAtTime() {}, exponentialRampToValueAtTime() {}}, connect() {}, disconnect() {}, start() {audioStats.played++;}, stop() {}};}
+	createOscillator() {const oscillator = {frequency: {setValueAtTime() {}, exponentialRampToValueAtTime() {}}, connect() {}, disconnect() {}, start() {audioStats.played++;}, stop() {}}; audioStats.oscillators.push(oscillator); return oscillator;}
 	createGain() {return {gain: {setValueAtTime() {}, exponentialRampToValueAtTime() {}}, connect() {}, disconnect() {}};}
 	close() {audioStats.closed++; return Promise.resolve();}
 }
@@ -123,7 +123,9 @@ const window = {
 };
 
 const code = fs.readFileSync(path.join(__dirname, '..', 'assets', 'js', 'neondrift.js'), 'utf8');
-vm.runInNewContext(code, {window, document, Math, Set, Array, String, Number, Promise});
+vm.runInNewContext(code, {window, document, Math, Set, Array, String, Number, Promise}, {
+	filename: path.join(__dirname, '..', 'assets', 'js', 'neondrift.js')
+});
 
 async function main() {
 	const game = window.NeonDrift.mount(root, labels, {profileUrl: '/?name=neondriftprofileoutput&out=json'});
@@ -322,6 +324,487 @@ async function main() {
 	assert.equal(serverProfile.version, undefined);
 	assert.equal(ui.get('[data-role="profile-status"]').textContent, 'Deleted');
 
+	// Explicitly exercise other input modes, lifecycle interruptions and browser failures.
+	const blankCanvas = {getContext: () => null};
+	const blankRoot = {querySelector: selector => selector === '[data-role="canvas"]' ? blankCanvas : ui.get(selector)};
+	window.NeonDrift.mount(blankRoot, labels);
+	assert.equal(ui.get('[data-role="announcement"]').textContent, 'Error');
+	assert.ok(audioStats.oscillators.length > 0);
+	for(const oscillator of audioStats.oscillators) oscillator.onended?.();
+
+	const oldRequestFullscreen = root.requestFullscreen;
+	root.requestFullscreen = async () => {throw Error('Fullscreen blocked');};
+	await game.toggleFullscreen();
+	assert.equal(ui.get('[data-role="announcement"]').textContent, labels.fullscreen_error);
+	root.requestFullscreen = oldRequestFullscreen;
+
+	const savedAudioContext = game.audioContext;
+	game.audioContext = {state: 'suspended', async resume() {throw Error('Audio blocked');}};
+	await game.toggleSound();
+	assert.equal(game.audioEnabled, false);
+	assert.equal(game.soundButton.disabled, true);
+	game.audioContext = savedAudioContext;
+	game.soundButton.disabled = false;
+	game.audioEnabled = true;
+	const createOscillator = savedAudioContext.createOscillator;
+	savedAudioContext.createOscillator = () => {throw Error('Audio unavailable');};
+	game.playSound('hit');
+	assert.equal(game.audioEnabled, false);
+	savedAudioContext.createOscillator = createOscillator;
+
+	game.setState('idle');
+	document.activeElement = canvas;
+	listeners.get('keydown')({key: ' ', repeat: false, preventDefault() {}});
+	assert.equal(game.state, 'running', 'Space starts a run when the Canvas is focused');
+	listeners.get('keydown')({key: ' ', repeat: false, preventDefault() {}});
+	assert.equal(game.state, 'paused');
+	game.start();
+	assert.equal(game.state, 'running', 'Start resumes a paused game');
+	listeners.get('keydown')({key: 'Escape', repeat: false, preventDefault() {}});
+	assert.equal(game.state, 'paused');
+	game.start();
+	listeners.get('keydown')({key: 'j', repeat: false, preventDefault() {}});
+	assert.ok(game.dashTimer > 0);
+	game.dashCooldown = 0;
+	game.dashTimer = 0;
+	listeners.get('keydown')({key: 'a', repeat: false, preventDefault() {}});
+	listeners.get('keydown')({key: 'w', repeat: false, preventDefault() {}});
+	const diagonal = game.movementVector();
+	assert.ok(Math.hypot(diagonal.x, diagonal.y) <= 1.001);
+	listeners.get('keyup')({key: 'a'});
+	listeners.get('keyup')({key: 'w'});
+	game.pointer = {x: game.player.x + 60, y: game.player.y + 60};
+	assert.ok(game.movementVector().x > 0, 'Pointer steering works without keyboard input');
+	game.pointer = {x: game.player.x + 1, y: game.player.y + 1};
+	assert.equal(game.movementVector().x, 0, 'Dead zone ignores pointer jitter');
+	game.pointer = null;
+	canvas.handlers.pointerdown({button: 2, pointerId: 30, clientX: 10, clientY: 10});
+	assert.equal(game.pointerId, null, 'Non-primary pointer is ignored');
+	canvas.handlers.pointerdown({button: 0, pointerId: 31, clientX: -100, clientY: 9999});
+	assert.equal(game.pointer.x, 0, 'Pointer x is clamped');
+	assert.equal(game.pointer.y, 540, 'Pointer y is clamped');
+	canvas.handlers.pointerdown({button: 0, pointerId: 32, clientX: 100, clientY: 100});
+	assert.equal(game.pointerId, 31, 'Second pointer cannot steal steering');
+	canvas.handlers.pointermove({pointerId: 32, clientX: 200, clientY: 200});
+	assert.equal(game.pointer.x, 0);
+	canvas.handlers.pointerup({pointerId: 32});
+	assert.equal(game.pointerId, 31);
+	canvas.handlers.pointerup({pointerId: 31});
+	assert.equal(game.pointerId, null);
+
+	// Visual variants, hit zones, moving threats and deterministic spawn patterns.
+	const dummyHazard = type => ({type, x: 200, y: 200, vx: 0, vy: 100,
+		speed: 100, angle: 0, spin: 0, age: 0, radius: 21});
+	game.drawHazard(context, dummyHazard('shard'));
+	game.drawHazard(context, dummyHazard('dart'));
+	game.drawHazard(context, dummyHazard('hunter'));
+	for(const vertical of [false, true]) {
+		for(const age of [0, 2]) {
+			game.drawBeam(context, {vertical, age, warning: 1, coordinate: 200, width: 20});
+		}
+	}
+	for(const age of [0, 2]) game.drawPulse(context, {x: 300, y: 300, age, warning: 1, duration: 2});
+	assert.equal(canvasStateDepth, 0);
+	game.startNewRun();
+	game.core = {x: 100, y: 100, radius: 12};
+	game.spawnTimer = 2;
+	game.hazards = [dummyHazard('hunter')];
+	game.update(.016);
+	assert.ok(game.hazards[0].vx !== 0, 'Hunter moves toward player');
+	game.hazards = [dummyHazard('shard')];
+	game.hazards[0].x = game.player.x;
+	game.hazards[0].y = game.player.y;
+	game.hitTimer = 0;
+	game.update(.016);
+	assert.equal(game.energy, 2, 'Physical hazard collision removes energy');
+	game.hazards = [];
+	game.hitTimer = 0;
+	game.beams = [{vertical: true, coordinate: game.player.x, width: 30, age: 1, warning: 1, duration: .62}];
+	game.update(.016);
+	assert.equal(game.energy, 1, 'Active vertical beam collision removes energy');
+	game.beams = [];
+	game.hitTimer = 0;
+	game.pulses = [{x: game.player.x + 108, y: game.player.y, age: .49, warning: 0, duration: 1}];
+	game.update(.016);
+	assert.equal(game.energy, 0, 'Expanding pulse collision removes energy');
+	assert.equal(game.state, 'over');
+	game.startNewRun();
+	game.core = {x: 100, y: 100, radius: 12};
+	game.beams = [{vertical: false, coordinate: game.player.y, width: 20, age: 1, warning: 1, duration: .62}];
+	game.hitTimer = 0;
+	game.update(.016);
+	assert.equal(game.energy, 2, 'Horizontal beam collision uses vertical player coordinate');
+	game.beams = [];
+	game.pulses = [];
+	game.hazards = [];
+	game.hitTimer = 0;
+	game.level = 3;
+	game.hitsThisLevel = 1;
+	const scoreBeforeHitClear = game.score;
+	game.completeLevel();
+	assert.equal(game.score - scoreBeforeHitClear, 750, 'A hit prevents the perfect-level score bonus');
+	assert.equal(game.energy, 3, 'Every third level replenishes energy');
+	game.level = 3;
+	game.hitsThisLevel = 0;
+	const scoreBeforePerfectClear = game.score;
+	game.completeLevel();
+	assert.equal(game.score - scoreBeforePerfectClear, 1200, 'A perfect clear awards the additional score bonus');
+	assert.equal(game.energy, 4, 'Energy recharge is capped at four');
+	game.startNewRun();
+	game.emitParticles(200, 200, '#fff', 240);
+	assert.equal(game.particles.length, 210, 'Particles are strictly bounded');
+	game.updateEffects(2);
+	assert.equal(game.particles.length, 0, 'Expired particles are removed');
+	game.setState('running');
+	game.spawnTimer = 0;
+
+	const originalRandomAgain = Math.random;
+	try {
+		for(const phase of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {
+			for(const roll of [.05, .23, .34, .45, .61, .74, .92]) {
+				Math.random = () => roll;
+				game.level = phase;
+				game.patternCounter = 0;
+				game.hazards = [];
+				game.beams = [];
+				game.pulses = [];
+				game.spawnPattern();
+			}
+		}
+		for(const roll of [.1, .3, .6, .9]) {
+			Math.random = () => roll;
+			game.hazards = [];
+			game.spawnVolley();
+			assert.equal(game.hazards.length, 3);
+		}
+		Math.random = () => .9;
+		game.player.x = 480;
+		game.player.y = 270;
+		game.level = 1;
+		game.hazards = [];
+		game.spawnBeam();
+		assert.equal(game.beams.at(-1).vertical, true);
+		Math.random = () => .1;
+		game.spawnBeam();
+		assert.equal(game.beams.at(-1).vertical, false);
+		game.hazards = Array.from({length: 34}, () => dummyHazard('shard'));
+		game.spawnPattern();
+		assert.equal(game.hazards.length, 34);
+		game.hazards = Array.from({length: 33}, () => dummyHazard('shard'));
+		game.spawnVolley();
+		assert.equal(game.hazards.length, 34);
+		Math.random = () => .5;
+		game.hazards = [];
+		const fallbackCore = game.placeCore();
+		assert.equal(fallbackCore.x, game.player.x, 'Placement stops after bounded retries');
+	} finally {
+		Math.random = originalRandomAgain;
+	}
+	game.startNewRun();
+	assert.equal(game.profileDeleting, false);
+	// Leave the originally tested real profile lifecycle intact before teardown.
+
+	// Remaining error paths and host lifecycle integrations.
+	game.startNewRun();
+	document.hidden = true;
+	listeners.get('visibilitychange')();
+	assert.equal(game.state, 'paused', 'Hidden browser pauses an active game');
+	document.hidden = false;
+	game.start();
+	const originalHasFocus = document.hasFocus;
+	document.hasFocus = () => false;
+	windowListeners.get('blur')();
+	assert.equal(game.state, 'paused', 'Window blur pauses without changing the score');
+	document.hasFocus = originalHasFocus;
+	game.start();
+	listeners.get('keydown')({key: 'd', repeat: false, preventDefault() {}});
+	game.dashCooldown = 0;
+	game.dash();
+	assert.ok(game.player.vx > 0, 'Dash follows an active movement direction');
+	listeners.get('keyup')({key: 'd'});
+
+	const randomBeforeLastPatterns = Math.random;
+	try {
+		Math.random = () => .9;
+		game.level = 4;
+		game.beams = Array.from({length: 3}, () => ({vertical: true, coordinate: 100,
+			width: 24, age: 0, warning: 1, duration: .6}));
+		game.hazards = [];
+		game.spawnPattern();
+		assert.equal(game.hazards.at(-1).type, 'dart', 'Crowded beam slots fall back to a dart');
+		game.beams = [];
+		game.hazards = [];
+		game.level = 13;
+		game.patternCounter = 3;
+		game.spawnPattern();
+		assert.equal(game.hazards.length, 2, 'Higher tiers schedule an additional threat');
+		assert.equal(game.hazards.at(-1).type, 'hunter');
+	} finally {
+		Math.random = randomBeforeLastPatterns;
+	}
+
+	const originalProfileUrl = game.profileUrl;
+	const originalFetch = window.fetch;
+	game.profileUrl = '';
+	await game.loadProfile();
+	assert.equal(game.profileStatus.textContent, labels.profile_unavailable);
+	game.profileUrl = originalProfileUrl;
+	window.fetch = async () => {throw Error('Network offline');};
+	await game.loadProfile();
+	assert.equal(game.profileStatus.textContent, labels.profile_unavailable);
+	game.profileAvailable = true;
+	await game.persistProfile('save');
+	assert.equal(game.profileStatus.textContent, labels.profile_error);
+	game.applyProfile({version: 1, best: 300});
+	await game.deleteProfile();
+	assert.equal(game.profileStatus.textContent, labels.profile_error);
+	assert.equal(game.profileDeleting, false);
+	window.fetch = originalFetch;
+	document.fullscreenElement = root;
+
+	ui.get('[data-action="restart"]').handlers.click();
+	assert.equal(game.state, 'running', 'Restart action creates a fresh run');
+	scheduledFrame(5000);
+	const lastRandom = Math.random;
+	try {
+		Math.random = () => .8;
+		game.hazards = [{x: 723, y: 390, radius: 15}];
+		game.placeCore();
+	} finally {
+		Math.random = lastRandom;
+	}
+	game.audioContext.close = async () => {
+		audioStats.closed++;
+		throw Error('Audio cleanup rejected');
+	};
+	document.exitFullscreen = async () => {throw Error('Fullscreen cleanup rejected');};
+
+	// Explicit return branches and accessiblity-related controls.
+	game.resume();
+	game.pause();
+	game.pause();
+	assert.equal(game.state, 'paused');
+	game.resume();
+	game.fullscreenButton.disabled = true;
+	await game.toggleFullscreen();
+	game.fullscreenButton.disabled = false;
+	game.soundButton.disabled = true;
+	await game.toggleSound();
+	game.soundButton.disabled = false;
+	game.syncFullscreen();
+	assert.equal(document.activeElement, canvas);
+	game.announce(null);
+	assert.equal(game.announcement.textContent, '');
+	game.announce('Missing {placeholder}');
+	assert.equal(game.announcement.textContent, 'Missing {placeholder}');
+	game.dashCooldown = 1;
+	const oldDashTimer = game.dashTimer;
+	game.dash();
+	assert.equal(game.dashTimer, oldDashTimer, 'Dash is unavailable during cooldown');
+	game.dashCooldown = 0;
+	game.reducedMotion = true;
+	game.dash();
+	game.player.vx = 300;
+	game.drawPlayer(context, 2);
+	game.drawPulse(context, {x: 400, y: 400, age: 0, warning: 1, duration: 2});
+	game.core = {x: game.player.x, y: game.player.y, radius: 12};
+	game.collectCore();
+	game.hitTimer = 2;
+	const energyBeforeInvulnerability = game.energy;
+	game.takeHit();
+	assert.equal(game.energy, energyBeforeInvulnerability);
+	game.hitTimer = 0;
+	game.dashTimer = 0;
+	game.takeHit();
+	assert.equal(game.shake, 0, 'Reduced motion removes collision shaking');
+	game.reducedMotion = false;
+	game.combo = 2;
+	game.comboTimer = .01;
+	game.hitTimer = 2;
+	game.player.x = 30;
+	game.player.y = 30;
+	game.player.vx = -100;
+	game.player.vy = -100;
+	game.update(.02);
+	assert.equal(game.combo, 0, 'Combos expire once their timer reaches zero');
+	assert.equal(game.player.vx, 0);
+	assert.equal(game.player.vy, 0);
+	game.player.x = 480;
+	game.player.y = 270;
+	game.setState('between');
+	canvas.handlers.pointerdown({button: 0, pointerId: 90, clientX: 200, clientY: 100});
+	assert.equal(game.pointerId, null, 'Paused between-level menu ignores pointer steering');
+	game.setState('idle');
+	canvas.handlers.pointerdown({button: 0, pointerId: 91, clientX: 200, clientY: 100});
+	assert.equal(game.state, 'running', 'Primary pointer can start an idle game');
+	canvas.handlers.pointerup({pointerId: 91});
+	game.pause();
+	game.dash();
+	assert.equal(game.state, 'paused');
+	game.resume();
+	game.setState('running');
+	game.energy = 1;
+	game.hitTimer = 0;
+	game.dashTimer = 0;
+	game.hazards = [dummyHazard('shard'), dummyHazard('dart')];
+	for(const hazard of game.hazards) {hazard.x = game.player.x; hazard.y = game.player.y;}
+	game.update(.016);
+	assert.equal(game.state, 'over', 'Fatal collision ends the hazard loop');
+
+	const randomForMixedThreat = Math.random;
+	try {
+		Math.random = () => .75;
+		game.level = 6;
+		game.patternCounter = 4;
+		game.hazards = [];
+		game.spawnPattern();
+		assert.equal(game.hazards.length, 2, 'First campaign tier adds a shard');
+		assert.equal(game.hazards.at(-1).type, 'shard');
+	} finally {
+		Math.random = randomForMixedThreat;
+	}
+	game.startNewRun();
+	game.hazards = [dummyHazard('hunter')];
+	game.beams = [{vertical: true, coordinate: 200, width: 30, age: 1, warning: .5, duration: .8}];
+	game.pulses = [{x: 400, y: 400, age: 1.2, warning: 1, duration: .8}];
+	game.dashTimer = .12;
+	game.player.vx = 300;
+	game.draw(10);
+	assert.equal(canvasStateDepth, 0, 'Each kind of rendered threat restores Canvas state');
+	game.hazards = [];
+	game.beams = [];
+	game.pulses = [];
+	game.frame(5100);
+	game.reducedMotion = true;
+	game.frame(5200);
+	game.setState('over');
+	game.frame(5300);
+	game.reducedMotion = false;
+
+	// Existing browser buttons also restore Canvas focus during active gameplay.
+	game.startNewRun();
+	const lastAudioContext = game.audioContext;
+	const savedAudioConstructor = window.AudioContext;
+	game.audioContext = null;
+	window.AudioContext = undefined;
+	window.webkitAudioContext = FakeAudioContext;
+	await game.toggleSound();
+	assert.equal(game.audioEnabled, true, 'WebKit audio constructor is supported');
+	game.playSound('unexpected');
+	game.audioEnabled = false;
+	game.audioContext = lastAudioContext;
+	window.AudioContext = savedAudioConstructor;
+	delete window.webkitAudioContext;
+	document.activeElement = game.soundButton;
+	ui.get('[data-action="sound"]').handlers.click();
+	assert.equal(document.activeElement, canvas);
+	document.activeElement = game.saveButton;
+	ui.get('[data-action="save"]').handlers.click();
+	assert.equal(document.activeElement, canvas);
+	await game.profileQueue;
+	document.activeElement = game.deleteButton;
+	ui.get('[data-action="delete"]').handlers.click();
+	assert.equal(document.activeElement, canvas);
+	await game.profileQueue;
+
+	// Profile failure paths never send writes for unavailable sessions.
+	const fetchBeforeBranches = window.fetch;
+	const profileUrlBeforeBranches = game.profileUrl;
+	game.profileAvailable = false;
+	await game.persistProfile('save');
+	game.deleteProfile();
+	game.profileAvailable = true;
+	game.applyProfile({});
+	game.deleteProfile();
+	game.applyProfile({version: 1, best: 'not an integer', checkpoint: null});
+	game.resumeSaved();
+	game.savedProfile = {checkpoint: {level: '3', score: 12, energy: 2, elapsed: 12}};
+	game.setState('paused');
+	game.resumeSaved();
+	assert.equal(game.state, 'paused', 'Malformed checkpoints are rejected');
+	game.savedProfile = {checkpoint: {level: 3, score: 12, energy: 2, elapsed: 12}};
+	game.setState('running');
+	game.resumeSaved();
+	assert.equal(game.state, 'running', 'A running game cannot be overwritten by a save');
+	game.setState('paused');
+	game.applyProfile({version: 1, best: 12, checkpoint: {level: 3, score: 12, energy: 2, elapsed: 12}});
+	const originalConfirm = window.confirm;
+	window.confirm = () => false;
+	await game.deleteProfile();
+	assert.equal(game.profileDeleting, false, 'Rejected deletion confirmation is harmless');
+	window.confirm = originalConfirm;
+
+	window.fetch = async () => ({ok: false, json: async () => ({ok: false})});
+	await game.loadProfile();
+	assert.equal(game.profileStatus.textContent, labels.profile_unavailable);
+	await game.persistProfile('record');
+	assert.equal(game.profileStatus.textContent, labels.profile_error);
+	await game.deleteProfile();
+	assert.equal(game.profileStatus.textContent, labels.profile_error);
+
+	window.fetch = async () => ({ok: true, json: async () => ({ok: true, token: 'f'.repeat(64), profile: null})});
+	await game.loadProfile();
+	assert.equal(game.profileEnabled, false);
+	window.fetch = async () => ({ok: true, json: async () => ({ok: true, token: 'f'.repeat(64), profile: {version: 1, best: 85}})});
+	await game.loadProfile();
+	assert.equal(game.profileStatus.textContent, labels.profile_present);
+	window.fetch = async () => ({ok: true, json: async () => ({ok: true, token: null})});
+	await game.loadProfile();
+	assert.equal(game.profileStatus.textContent, labels.profile_unavailable);
+
+	window.fetch = async () => ({ok: true, json: async () => {
+		root.isConnected = false;
+		return {ok: true, token: 'f'.repeat(64), profile: {version: 1}};
+	}});
+	await game.loadProfile();
+	root.isConnected = true;
+	window.fetch = async () => {game.destroyed = true; throw Error('Network stopped after unmount');};
+	await game.loadProfile();
+	game.destroyed = false;
+
+	game.profileUrl = profileUrlBeforeBranches;
+	game.profileAvailable = true;
+	game.applyProfile({version: 1, best: 85});
+	window.fetch = fetchBeforeBranches;
+	const queuedWrite = game.persistProfile('record');
+	game.destroyed = true;
+	await queuedWrite;
+	game.destroyed = false;
+	const queuedDelete = game.deleteProfile();
+	game.destroyed = true;
+	await queuedDelete;
+	game.destroyed = false;
+	assert.equal(game.profileDeleting, false);
+
+	game.profileAvailable = true;
+	window.fetch = async () => ({ok: true, json: async () => {
+		root.isConnected = false;
+		return {ok: true, profile: {version: 1, best: 85}};
+	}});
+	await game.persistProfile('save');
+	root.isConnected = true;
+	game.applyProfile({version: 1, best: 85});
+	await game.deleteProfile();
+	root.isConnected = true;
+	window.fetch = fetchBeforeBranches;
+
+	game.startNewRun();
+	game.reducedMotion = true;
+	game.dashTimer = .2;
+	game.hazards = [dummyHazard('shard')];
+	game.hazards[0].x = game.player.x;
+	game.hazards[0].y = game.player.y;
+	game.update(.016);
+	assert.equal(game.energy, 3, 'Reduced-motion dash protects from collisions');
+	game.reducedMotion = false;
+	const audioContextBeforeDestroyedResume = game.audioContext;
+	game.audioEnabled = false;
+	game.audioContext = {state: 'suspended', async resume() {game.destroyed = true;}};
+	await game.toggleSound();
+	assert.equal(game.audioEnabled, false, 'Sound activation does not resume after unmount');
+	game.destroyed = false;
+	game.audioContext = audioContextBeforeDestroyedResume;
+
 	root.isConnected = false;
 	game.frame(2000);
 	assert.equal(game.destroyed, true);
@@ -330,6 +813,21 @@ async function main() {
 	assert.equal(motionListeners.size, 0);
 	assert.equal(audioStats.closed, 1);
 	assert.equal(cancelledFrame, 1);
+	game.destroy();
+	await Promise.resolve();
+
+	const defaultRatio = window.devicePixelRatio;
+	const defaultAudio = window.AudioContext;
+	window.devicePixelRatio = 0;
+	window.AudioContext = undefined;
+	root.isConnected = true;
+	const unavailableAudioGame = window.NeonDrift.mount(root, labels, {profileUrl: ''});
+	assert.equal(unavailableAudioGame.canvas.width, 960, 'Missing DPR uses one pixel per unit');
+	assert.equal(unavailableAudioGame.soundButton.disabled, true, 'Missing Web Audio disables sound');
+	unavailableAudioGame.destroy();
+	window.devicePixelRatio = defaultRatio;
+	window.AudioContext = defaultAudio;
+	root.isConnected = false;
 	console.log('Neon Drift level, dash, profile and lifecycle tests passed.');
 }
 

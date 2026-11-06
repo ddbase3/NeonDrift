@@ -77,3 +77,8 @@ PHPUnit tests under `NeonDrift/test/` cover MVC asset and endpoint resolution, a
 The storage is an **optional** account-related processing operation. See [PRIVACY.md](PRIVACY.md) for record fields, purposes, pseudonymous identifiers, operations, deletion, recipient/retention dependencies and outstanding compliance questions. No cookies, localStorage or IndexedDB are used by the game itself, but the host session service may rely on a session cookie.
 
 The game provides visible keyboard focus, 44px minimum touch targets for header controls, a textual level and score HUD, a semantic progressbar with synchronized ARIA values, screen-reader status announcements, keyboard and pointer input, responsive mobile/fullscreen layouts, forced-color UI styles and live `prefers-reduced-motion` support. Sound is disabled by default and locally synthesized only after user action. The spatial Canvas action mechanics do not provide equivalent non-visual gameplay, so **full WCAG 2.2 AA / EN 301 549 compliance cannot be claimed** without further accessibility design. Site-specific authorization, CSP/iframe fullscreen permissions, 400% zoom, assistive technology and real ILIAS AJAX behavior still require operator validation.
+
+
+## Games settings
+
+`NeondriftSettingsTab` contributes `neondriftdisplay` under ClientStack Games. The feature controls settings-navigation visibility, not the public browser game. Anonymous play remains possible; the optional authenticated profile output retains its own session/CSRF checks.

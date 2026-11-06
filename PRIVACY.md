@@ -47,3 +47,7 @@ This plugin does not require its own credentials or database permissions. It rel
 Neon Drift provides native keyboard-operable buttons, keyboard and pointer/touch steering, textual progress and a semantic progressbar, an ARIA live status, keyboard focus management, high-contrast control styles, audio opt-in and a dynamic reduced-motion setting for decorative effects. However, hazards are spatially represented in Canvas, and equivalent non-visual gameplay is not yet provided. Full WCAG 2.2 AA or EN 301 549 conformance cannot be claimed. Operators must test focus/keyboard, responsive zoom, contrast, announcements with screen readers, touch input, reduced motion and their host admin/AJAX integration.
 
 Before production deployment, verify: active user and session semantics, ISettingsStore durability and user separation, route behavior and authorization, HTTPS and CSRF, DB/file retention, backup removal, host logging/caching, browser/CSP behavior, applicable privacy notices, and the accessibility limitations above. No invented compliance certifications, hosting assurances, or global retention values are implied by this source inventory.
+
+### Settings integration (November 2026)
+
+The settings tab contributes navigation only. Anonymous gameplay and optional per-account profile storage retain the existing access boundaries.

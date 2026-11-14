@@ -1,11 +1,26 @@
 <?php declare(strict_types=1);
 
-namespace NeonDrift;
+/***********************************************************************
+ * This file is part of NeonDrift for BASE3 Framework.
+ *
+ * NeonDrift is a reaction and dexterity arcade game for BASE3.
+ * It provides level-based gameplay and optional player profiles.
+ * Its display and settings use the existing BASE3 services.
+ *
+ * Developed by Daniel Dahme
+ * Licensed under GPL-3.0-or-later
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * https://base3.de
+ ***********************************************************************/
 
-use Base3\Api\IContainer;
-use Base3\Api\IPlugin;
-use Base3\Settings\Api\ISettingsStore;
-use NeonDrift\Service\NeonDriftProfileStore;
+
+namespace Base3\NeonDrift;
+
+use Base3\CoreFoundation\Api\IContainer;
+use Base3\CoreFoundation\Api\IPlugin;
+use Base3\CoreFoundation\Settings\Api\ISettingsStore;
+use Base3\NeonDrift\Service\NeonDriftProfileStore;
 
 /**
  * Registers the Neon Drift BASE3 plugin.

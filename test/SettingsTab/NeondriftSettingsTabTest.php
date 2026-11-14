@@ -1,15 +1,30 @@
 <?php declare(strict_types=1);
 
-namespace NeonDrift\Test\SettingsTab;
+/***********************************************************************
+ * This file is part of NeonDrift for BASE3 Framework.
+ *
+ * NeonDrift is a reaction and dexterity arcade game for BASE3.
+ * It provides level-based gameplay and optional player profiles.
+ * Its display and settings use the existing BASE3 services.
+ *
+ * Developed by Daniel Dahme
+ * Licensed under GPL-3.0-or-later
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * https://base3.de
+ ***********************************************************************/
 
-use Base3\Authorization\Api\IAuthorizationService;
-use Base3\Authorization\Dto\AuthorizationDecision;
-use Base3\Authorization\Dto\AuthorizationRequest;
-use Base3\Translation\Api\ITranslation;
-use NeonDrift\SettingsTab\NeondriftSettingsTab;
+
+namespace Base3\NeonDrift\Test\SettingsTab;
+
+use Base3\CoreFoundation\Authorization\Api\IAuthorizationService;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationDecision;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationRequest;
+use Base3\CoreFoundation\Translation\Api\ITranslation;
+use Base3\NeonDrift\SettingsTab\NeondriftSettingsTab;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use UiFoundation\Api\ISettingsTab;
+use Base3\UiFoundation\Api\ISettingsTab;
 
 final class NeondriftSettingsTabTest extends TestCase {
 

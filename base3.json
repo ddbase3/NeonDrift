@@ -2,12 +2,20 @@
 	"manifestVersion": 1,
 	"name": "NeonDrift",
 	"namespace": "Base3\\NeonDrift",
-	"version": "0.3.0",
+	"version": "5.0.0",
 	"description": "A level-based reaction and dexterity arcade game for BASE3 with optional personal profiles.",
 	"license": "GPL-3.0-or-later",
+	"maintainers": [
+		{
+			"name": "Daniel Dahme",
+			"url": "https://www.base3.de",
+			"email": "info@base3.de"
+		}
+	],
+	"repository": "https://github.com/ddbase3/NeonDrift",
 	"dependencies": {
-		"ClientStack": ">=4.23.0",
-		"CoreFoundation": ">=4.10.0",
-		"UiFoundation": ">=4.3.0"
+		"ClientStack": ">=5.0.0",
+		"CoreFoundation": ">=5.0.0",
+		"UiFoundation": ">=5.0.0"
 	}
 }
